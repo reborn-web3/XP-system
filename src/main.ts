@@ -1,73 +1,74 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, TFile, debounce } from 'obsidian';
+import { DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab } from "./settings";
 
 // Remember to rename these classes and interfaces!
 
-export default class MyPlugin extends Plugin {
+import { parseKanbanFile } from "./parser";
+import { TaskTracker } from "./tracker";
+
+export default class XPSystemPlugin extends Plugin {
 	settings: MyPluginSettings;
+	tracker: TaskTracker;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+		// Hello World notice
+		new Notice('XP System Plugin Loaded');
+		console.log('XP System Plugin Loaded');
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+		// Initialize Tracker
+		this.tracker = new TaskTracker(this.app.vault);
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+		// Track specific file (hardcoded for now as per plan Phase 0/1)
+		const trackedFile = '00. Inbox/test.md';
+
+		// Initialize state on load if file exists
+		this.app.workspace.onLayoutReady(async () => {
+			const file = this.app.vault.getAbstractFileByPath(trackedFile);
+			if (file instanceof TFile) {
+				await this.tracker.initializeFile(file);
 			}
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		// Register File Modify Event with Debounce (1s)
+		this.registerEvent(
+			this.app.vault.on('modify', debounce((file) => {
+				if (file instanceof TFile && file.path === trackedFile) {
+					this.tracker.processFileChange(file);
 				}
-				return false;
+			}, 1000, true))
+		);
+
+		this.addCommand({
+			id: 'xp-system-test',
+			name: 'Test XP System Parser',
+			callback: async () => {
+				const file = this.app.vault.getAbstractFileByPath('00. Inbox/test.md');
+				if (file) {
+					// @ts-ignore - we know it's a TFile
+					const content = await this.app.vault.read(file);
+					const data = parseKanbanFile(content);
+					console.log(data);
+
+					// Write debug output
+					const debugPath = '00. Inbox/debug_parser_output.json';
+					let debugFile = this.app.vault.getAbstractFileByPath(debugPath);
+					if (!debugFile) {
+						// @ts-ignore
+						debugFile = await this.app.vault.create(debugPath, JSON.stringify(data, null, 2));
+					} else {
+						// @ts-ignore
+						await this.app.vault.modify(debugFile, JSON.stringify(data, null, 2));
+					}
+					new Notice('Parser test complete. Check debug_parser_output.json');
+				} else {
+					new Notice('Test file not found!');
+				}
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
 	}
 
 	onunload() {
@@ -88,12 +89,12 @@ class SampleModal extends Modal {
 	}
 
 	onOpen() {
-		let {contentEl} = this;
+		let { contentEl } = this;
 		contentEl.setText('Woah!');
 	}
 
 	onClose() {
-		const {contentEl} = this;
+		const { contentEl } = this;
 		contentEl.empty();
 	}
 }
